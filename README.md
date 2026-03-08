@@ -34,7 +34,7 @@ flowchart TD
   U[👤 User / Client App] -->|query| S[🖥️ Your Server]
   S --> C[🧠 FluidToolsClient]
 
-  C --> CF[🧼 Content Filter\n(input/output)]
+  C --> CF[🧼 Content Filter input output]
   CF --> RL[🧯 Rate Limiter]
   RL --> SS[🧵 Session + TTL]
   SS --> CP[(💾 LangGraph Checkpointer)]
@@ -58,11 +58,11 @@ flowchart TD
   HITL -- yes --> PC[⏸️ Pending confirmations]
   PC -->|approve/reject| G
 
-  HITL -- no --> EX[⚙️ Tool executor\n(axios + zod)]
+  HITL -- no --> EX[⚙️ Tool executor axios zod]
   EX --> API[🌐 External APIs]
   API --> EX
   EX --> LLM
-  ANS --> QL[🧾 QueryProvider.logQuery (optional)]
+  ANS --> QL[🧾 QueryProvider.logQuery - optional]
 ```
 
 ### Customization points (where FluidTools plugs into your app)
@@ -94,7 +94,7 @@ flowchart LR
   I -- yes --> J[Emit awaiting_confirmation]
   J --> K[Approve / Reject]
   K --> G
-  I -- no --> L[Execute tool(s)]
+  I -- no --> L[Execute tools]
   L --> M[Validate/limit responses]
   M --> G
 ```

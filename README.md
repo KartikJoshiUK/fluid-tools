@@ -34,7 +34,7 @@ flowchart TD
   U[👤 User / Client App] -->|query| S[🖥️ Your Server]
   S --> C[🧠 FluidToolsClient]
 
-  C --> CF[🧼 Content Filter<br/>(input/output)]
+  C --> CF[🧼 Content Filter\n(input/output)]
   CF --> RL[🧯 Rate Limiter]
   RL --> SS[🧵 Session + TTL]
   SS --> CP[(💾 LangGraph Checkpointer)]
@@ -58,7 +58,7 @@ flowchart TD
   HITL -- yes --> PC[⏸️ Pending confirmations]
   PC -->|approve/reject| G
 
-  HITL -- no --> EX[⚙️ Tool executor<br/>(axios + zod)]
+  HITL -- no --> EX[⚙️ Tool executor\n(axios + zod)]
   EX --> API[🌐 External APIs]
   API --> EX
   EX --> LLM

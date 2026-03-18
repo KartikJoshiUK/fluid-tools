@@ -675,3 +675,8 @@ Current version: **`1.0.0`** (stable).
 - Sub-path exports.
 - `onToolCall` hooks.
 - `listTools()` method.
+- LLM-enhanced semantic tool generation with enriched descriptions and domain grouping
+- OpenAPI-aware embedding-based tool routing for large API surfaces
+- - Persistent memory layer with user profiles and long-term context
+- Integrations with external platforms (Slack, webhooks, CRMs)
+- Native integration with OpenClaw to enable intelligent agent planning with production-grade tool execution via FluidTools

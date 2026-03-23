@@ -65,10 +65,10 @@ function inferZodFromOpenApiSchema(schema: OpenAPISchema | undefined, spec: Open
   }
 
   if (Array.isArray(resolved.anyOf) && resolved.anyOf.length > 0) {
-    console.warn("[openApiToTools] anyOf schemas are treated as z.unknown().");
+    console.warn("[FluidTools: OpenAPI Parsing] Notice: 'anyOf' schemas are currently processed as 'z.unknown()'.");
   }
   if (Array.isArray(resolved.oneOf) && resolved.oneOf.length > 0) {
-    console.warn("[openApiToTools] oneOf schemas are treated as z.unknown().");
+    console.warn("[FluidTools: OpenAPI Parsing] Notice: 'oneOf' schemas are currently processed as 'z.unknown()'.");
   }
 
   if (Array.isArray(resolved.enum) && resolved.enum.length > 0) {
@@ -204,7 +204,7 @@ export function openApiToTools(
       }
       if (name !== rawName) {
         console.warn(
-          `[openApiToTools] Tool name collision detected: '${rawName}' renamed to '${name}'.`
+          `[FluidTools: OpenAPI Configuration] Notice: Tool name collision detected. The tool '${rawName}' has been automatically renamed to '${name}' to ensure robust execution.`
         );
       }
       usedNames.add(name);
@@ -218,6 +218,7 @@ export function openApiToTools(
         name,
         description,
         schema,
+        metadata: { method },
         func: async (toolArgs: Record<string, unknown>) => {
           const args = toolArgs ?? {};
           const params: Record<string, string> = {};
@@ -242,8 +243,8 @@ export function openApiToTools(
                     Object.keys(body as Record<string, unknown>).map((key) => [key, "[REDACTED]"])
                   )
                 : undefined;
-            console.log(
-              "[openApiToTools] Request",
+            console.info(
+              "[FluidTools: Request Execution] Dispatched request payload:",
               JSON.stringify(
                 {
                   method: method.toUpperCase(),
@@ -305,7 +306,7 @@ export function openApiToTools(
             }
             if (isAxiosError(error) && error.response) {
               if (debug) {
-                console.error("[openApiToTools] Tool request failed", {
+                console.error("[FluidTools: Execution Error] Tool request encountered a failure", {
                   toolName: name,
                   status: error.response.status,
                   responseBody: "[REDACTED]",

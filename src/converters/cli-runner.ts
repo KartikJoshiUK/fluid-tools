@@ -38,15 +38,15 @@ function parseArgs(): CLIOptions {
 
 function showHelp() {
   console.log(`
-🔧 Postman to LangChain Tools Converter
+[FluidTools: Postman to LangChain Converter]
 
 Usage: 
   npm run convert-tools <input-file> [output-file]
   npm run convert-tools -- --help
 
 Options:
-  -h, --help              Show this help message
-  -o, --output <file>     Specify output file
+  -h, --help              Show this help display
+  -o, --output <file>     Designate output file
 
 Examples:
   npm run convert-tools api.json tools.ts
@@ -54,7 +54,7 @@ Examples:
   npm run convert-tools -- --help
 
 Input: Postman collection JSON file
-Output: TypeScript file with LangChain tools (prints to console if no output file)
+Output: TypeScript file containing LangChain tools (output is directed to stdout if no file is specified)
   `);
 }
 
@@ -69,7 +69,7 @@ function validateInputFile(inputFile: string): void {
 
   const ext = path.extname(inputFile).toLowerCase();
   if (ext !== '.json') {
-    console.warn(`⚠️  Warning: Expected .json file, got ${ext}`);
+    console.warn(`[FluidTools: CLI Warning] Unexpected file extension: expected '.json', but received '${ext}'.`);
   }
 }
 
@@ -79,7 +79,7 @@ function readPostmanCollection(inputFile: string): PostmanCollection {
     const collection = JSON.parse(content);
     
     if (!collection.info) {
-      console.warn('⚠️  Warning: Collection missing info section');
+      console.warn('[FluidTools: CLI Warning] The provided collection is missing the required "info" section.');
     }
     
     if (!collection.item || !Array.isArray(collection.item)) {
@@ -104,9 +104,9 @@ function writeOutput(code: string, outputFile?: string, toolCount: number = 0): 
     }
 
     fs.writeFileSync(outputFile, code);
-    console.log(`✅ Converted ${toolCount} tools to LangChain format`);
-    console.log(`📄 Output saved to: ${outputFile}`);
-    console.log(`📊 File size: ${(code.length / 1024).toFixed(2)} KB`);
+    console.info(`[FluidTools: Conversion Success] Successfully converted ${toolCount} tools to LangChain format.`);
+    console.info(`[FluidTools: File System] Output persistence established at: ${outputFile}`);
+    console.info(`[FluidTools: Statistics] Generated file size: ${(code.length / 1024).toFixed(2)} KB`);
   } else {
     console.log(code);
   }
@@ -123,21 +123,21 @@ function main(): void {
 
     validateInputFile(options.inputFile);
     
-    console.log(`🔄 Processing: ${options.inputFile}`);
+    console.info(`[FluidTools: Processing] Initiating conversion for: ${options.inputFile}`);
     
     const collection = readPostmanCollection(options.inputFile);
     const toolCount = collection.item ? collection.item.length : 0;
     
-    console.log(`📋 Collection: ${collection.info?.name || 'Unknown'}`);
-    console.log(`🔧 Found ${toolCount} potential tools`);
+    console.info(`[FluidTools: Metadata] Collection Name: ${collection.info?.name || 'Unknown'}`);
+    console.info(`[FluidTools: Analysis] Identified ${toolCount} potential tools within the collection.`);
     
     const code = postmanToLangChainCode(collection);
     
     writeOutput(code, options.outputFile, toolCount);
     
   } catch (error) {
-    console.error(`❌ Error: ${error instanceof Error ? error.message : error}`);
-    console.error('\nRun with --help for usage information');
+    console.error(`[FluidTools: Fatal Error] ${error instanceof Error ? error.message : error}`);
+    console.info('\nUse the --help flag for detailed usage information.');
     process.exit(1);
   }
 }

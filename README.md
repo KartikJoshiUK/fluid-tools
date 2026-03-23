@@ -1,6 +1,6 @@
 # FluidTools
 
-[![npm version](https://img.shields.io/badge/npm-1.0.0-blue?logo=npm&label=npm)](https://www.npmjs.com/package/fluid-tools)
+[![npm version](https://img.shields.io/badge/npm-1.1.0-blue?logo=npm&label=npm)](https://www.npmjs.com/package/fluid-tools)
 [![npm downloads](https://img.shields.io/badge/downloads-coming%20soon-lightgrey?logo=npm&label=downloads)](https://www.npmjs.com/package/fluid-tools)
 [![license](https://img.shields.io/github/license/KartikJoshiUK/fluid-tools.svg?label=license)](./LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/KartikJoshiUK/fluid-tools.svg)](https://github.com/KartikJoshiUK/fluid-tools)
@@ -435,6 +435,17 @@ const client = new FluidToolsClient({
   },
 });
 
+// Or use "Security by Default" (Restrictive Mode):
+const clientAlt = new FluidToolsClient({
+  config: { type: "openai", model: "gpt-4o-mini", apiKey: process.env.OPENAI_API_KEY! },
+  postmanCollection,
+  confirmationConfig: {
+    mode: "restrictive",
+    requireMethods: ["POST", "PUT", "DELETE"], // Automatically require HITL for these methods
+    excludeTools: ["get_users"]               // Explicitly safe tools
+  },
+});
+
 const pending = await client.getPendingConfirmations("session-token");
 await client.approveToolCall(pending[0].toolCallId, "session-token");
 // or:
@@ -633,6 +644,13 @@ const client = new FluidToolsClient({
 });
 ```
 
+### Production Checklist: Managing Durable Memory
+When using durable savers like Redis (e.g. `@langchain/langgraph-redis`) in production, checkpoints are created at every step and can grow indefinitely.
+
+1.  **Manual Cleanup**: Use `await client.clearThread(sessionId)` to explicitly purge session history from your checkpointer when a user starts a new chat or logs out.
+2.  **Redis TTL**: It is strongly recommended to configure your Redis checkpointer with a **TTL (Time To Live)** (e.g. 48 hours). This ensures that inactive or "ghost" sessions are automatically deleted by Redis, preventing storage bloat.
+3.  **Security**: Durable checkpointers store the conversation state. Ensure your storage layer is encrypted and properly access-controlled.
+
 ## Session Management
 
 ```ts
@@ -656,7 +674,7 @@ const client = new FluidToolsClient({
 
 ## Version
 
-Current version: **`1.0.0`** (stable).
+Current version: **`1.1.0`** (stable).
 
 ## Limitations
 
@@ -670,13 +688,7 @@ Current version: **`1.0.0`** (stable).
 
 - Custom logger injection.
 - `SessionStore` interface for pluggable session persistence.
-- `maxHistoryMessages` option.
 - Mistral and Bedrock providers.
 - Sub-path exports.
 - `onToolCall` hooks.
 - `listTools()` method.
-- LLM-enhanced semantic tool generation with enriched descriptions and domain grouping
-- OpenAPI-aware embedding-based tool routing for large API surfaces
-- - Persistent memory layer with user profiles and long-term context
-- Integrations with external platforms (Slack, webhooks, CRMs)
-- Native integration with OpenClaw to enable intelligent agent planning with production-grade tool execution via FluidTools

@@ -58,13 +58,17 @@ function getRawUrl(url: PostmanUrl): string {
 function flattenPostmanCollection(collection: PostmanCollection): PostmanRequest[] {
   const requests: PostmanRequest[] = [];
 
-  const visit = (items: PostmanItem[]): void => {
+  const visit = (items: PostmanItem[], folderStack: string[] = []): void => {
     for (const item of items) {
       if (item.request) {
-        requests.push({ name: item.name, request: item.request });
+        requests.push({
+          name: item.name,
+          request: item.request,
+          folderNames: [...folderStack],
+        });
       }
       if (Array.isArray(item.item) && item.item.length > 0) {
-        visit(item.item);
+        visit(item.item, [...folderStack, item.name]);
       }
     }
   };
@@ -233,17 +237,27 @@ function extractBodyFields(request: PostmanRequest): BodyField[] {
 
 function generateToolName(request: PostmanRequest, method: string, url: string): string {
   const requestName = request.name?.trim();
+  const folderNames = request?.folderNames || [];
+
+  let baseName = "request";
   if (requestName && !requestName.toLowerCase().includes("new request")) {
-    return requestName
-      .replace(/\s+/g, "_")
-      .replace(/[^a-zA-Z0-9_]/g, "_")
-      .replace(/^[0-9]/, "_$&")
-      .toLowerCase();
+    baseName = requestName;
+  } else {
+    const pathMatch = url.match(/\/([^/?]+)(?:\/[^/?]*)?$/);
+    baseName = pathMatch?.[1] ?? "api";
   }
 
-  const pathMatch = url.match(/\/([^/?]+)(?:\/[^/?]*)?$/);
-  const resource = pathMatch?.[1] ?? "api";
-  return `${method.toLowerCase()}_${resource}`.replace(/[^a-zA-Z0-9_]/g, "_");
+  // Prepend last folder name for better uniqueness
+  if (folderNames.length > 0) {
+    baseName = `${folderNames.at(-1)}_${baseName}`;
+  }
+
+  return `${method.toLowerCase()}_${baseName}`
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_]/g, "_")
+    .replace(/^[0-9]/, "_$&")
+    .replace(/_+/g, "_")
+    .toLowerCase();
 }
 
 function generateDescription(request: PostmanRequest): string {
@@ -388,13 +402,14 @@ export function postmanToTools(
     }
     if (name !== originalName) {
       console.warn(
-        `[postmanToTools] Tool name collision detected: '${originalName}' renamed to '${name}'. Fix duplicate names in your Postman collection.`
+        `[FluidTools: Postman Configuration] Notice: Tool name collision detected. The tool '${originalName}' has been automatically renamed to '${name}' to ensure robust execution. It is advisable to eliminate duplicate names within your Postman collection.`
       );
     }
     usedNames.add(name);
 
     const queryParams = extractQueryParams(request);
-    const pathParams = extractPathParams(request);
+    const configKeys = new Set(Object.keys(toolsConfig));
+    const pathParams = extractPathParams(request).filter((p) => !configKeys.has(p.key));
     const bodyFields = extractBodyFields(request);
     const schema = buildSchema(queryParams, pathParams, bodyFields, method);
     const description = generateDescription(request);
@@ -403,6 +418,7 @@ export function postmanToTools(
       name,
       description,
       schema,
+      metadata: { method },
       func: async (toolArgs: Record<string, unknown>) => {
         try {
           const args = toolArgs ?? {};
@@ -433,8 +449,8 @@ export function postmanToTools(
             const redactedBody = Object.keys(bodyPayload).length
               ? Object.fromEntries(Object.keys(bodyPayload).map((key) => [key, "[REDACTED]"]))
               : undefined;
-            console.log(
-              "[postmanToTools] Request",
+            console.info(
+              "[FluidTools: Request Execution] Dispatched request payload:",
               JSON.stringify(
                 { method, url: finalUrl, params: Object.keys(params), body: redactedBody },
                 null,
@@ -479,8 +495,8 @@ export function postmanToTools(
           }
 
           if (debug) {
-            console.log(
-              "[postmanToTools] Response",
+            console.info(
+              "[FluidTools: Response Handling] Received response payload:",
               JSON.stringify(responseData, null, 2)
             );
           }
@@ -493,7 +509,7 @@ export function postmanToTools(
           if (isAxiosError(error) && error.response) {
             const status = error.response.status;
             if (debug) {
-              console.error("[postmanToTools] Tool request failed", {
+              console.error("[FluidTools: Execution Error] Tool request encountered a failure", {
                 toolName: name,
                 status,
                 responseBody: "[REDACTED]",

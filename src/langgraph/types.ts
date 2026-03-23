@@ -91,10 +91,39 @@ export interface Model {
   };
 }
 
-// Human-in-the-loop types
+export type ConfirmationMode = "manual" | "restrictive" | "none";
+
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE" | "CONNECT" | "ALL";
+
+/**
+ * Human-in-the-loop (HITL) configuration.
+ */
 export interface ToolConfirmationConfig {
-  /** Tool names that require human confirmation before execution */
-  requireConfirmation: string[];
+  /**
+   * Configuration mode:
+   * - "manual": (Default) Only tools listed in `requireConfirmation` require approval.
+   * - "restrictive": All tools require approval, except those filtered out.
+   * - "none": HITL is disabled entirely.
+   */
+  mode?: ConfirmationMode;
+
+  /**
+   * HTTP methods that require confirmation when mode is "restrictive".
+   * E.g. ["POST", "PUT", "DELETE"].
+   * If ["ALL"] is included, all methods require confirmation.
+   * Default: ["POST", "PUT", "PATCH", "DELETE"] if mode is "restrictive".
+   */
+  requireMethods?: HttpMethod[];
+
+  /**
+   * Tools that ALWAYS require human confirmation regardless of mode.
+   */
+  requireConfirmation?: string[];
+
+  /**
+   * Tools that NEVER require human confirmation regardless of mode or method.
+   */
+  excludeTools?: string[];
 }
 
 export interface PendingToolCall {

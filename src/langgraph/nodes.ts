@@ -6,7 +6,8 @@ import {
   ToolMessage,
 } from "langchain";
 import MessagesState from './state';
-import { BaseCheckpointSaver, END, START, StateGraph } from '@langchain/langgraph';
+import { END, START, StateGraph } from '@langchain/langgraph';
+import { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 import { Model, PendingToolCall, ToolConfirmationConfig } from './types';
 import { RAGConfig, RAGDocument, RAGProvider } from '../types/rag.types';
 import { DEFAULT_SYSTEM_INSTRUCTIONS } from './constants';
@@ -29,8 +30,33 @@ const getAgent = (
   ragProvider?: RAGProvider // MongoRAGProvider implements this interface
 ) => {
   // Tools that require human confirmation
-  const requiresConfirmation = new Set(
-    confirmationConfig?.requireConfirmation || []
+  const modes = confirmationConfig?.mode || "manual";
+  const explicitRequire = new Set(confirmationConfig?.requireConfirmation || []);
+  const explicitExclude = new Set(confirmationConfig?.excludeTools || []);
+  const requireMethods = new Set(
+    confirmationConfig?.requireMethods || ["POST", "PUT", "PATCH", "DELETE"]
+  );
+
+  const checkRequiresConfirmation = (toolName: string): boolean => {
+    if (modes === "none") return false;
+    if (explicitExclude.has(toolName)) return false;
+    if (explicitRequire.has(toolName)) return true;
+
+    if (modes === "restrictive") {
+      const tool = toolObj.getToolByName()[toolName];
+      // Get method from tool metadata if it exists (set by converters)
+      const method = (tool?.metadata?.method as string | undefined)?.toUpperCase();
+
+      if (requireMethods.has("ALL")) return true;
+      if (method && requireMethods.has(method)) return true;
+    }
+
+    return false;
+  };
+
+  const isHitlEnabled = modes !== "none" && (
+    modes === "restrictive" ||
+    explicitRequire.size > 0
   );
 
   // Helper function to get the latest user message
@@ -47,11 +73,11 @@ const getAgent = (
 
   // RAG Router Node - LLM-based decision on whether to use RAG
   async function ragRouter(state: typeof MessagesState.State) {
-    logger(debug, "\n🧭 [ragRouter] Deciding whether to use RAG...");
-    
+    logger(debug, "\n[FluidTools: RAG Router] Deciding whether to use RAG...");
+
     const latestUserMessage = getLatestUserMessage(state);
     if (!latestUserMessage) {
-      logger(debug, "⚠️  [ragRouter] No user message found, defaulting to no RAG");
+      logger(debug, "[FluidTools: RAG Router] No user message found, defaulting to no RAG");
       return {
         ragDecision: { useRag: false }
       };
@@ -79,15 +105,15 @@ const getAgent = (
     const routerMessages = [
       new SystemMessage(routingPrompt),
       new HumanMessage(`User query: "${latestUserMessage}"`)
-    ];    
+    ];
 
     try {
       // Use the model directly for routing (can't reliably bind temperature across all model types)
       const response = await model.invoke(routerMessages);
       const content = String(response.content ?? "");
-      
-      logger(debug, "🧭 [ragRouter] Raw response:", content);
-      
+
+      logger(debug, "[FluidTools: RAG Router] Raw response:", content);
+
       // Parse JSON response
       const cleaned = content
         .trim()
@@ -98,19 +124,19 @@ const getAgent = (
         query?: string;
         k?: number;
       };
-      
+
       // Validate and set defaults
       const ragDecision = {
         useRag: Boolean(decision.useRag),
         query: decision.query || latestUserMessage,
         k: decision.k || ragConfig?.maxDocuments || 5
       };
-      
-      logger(debug, "🧭 [ragRouter] Decision:", ragDecision);
+
+      logger(debug, "[FluidTools: RAG Router] Decision:", ragDecision);
       return { ragDecision };
-      
+
     } catch (error) {
-      logger(debug, "⚠️  [ragRouter] Parse error, using defaults:", error);
+      logger(debug, "[FluidTools: RAG Router] Parse error, using defaults:", error);
       // On parse failure, default to no RAG to avoid unexpected retrieval overhead.
       return {
         ragDecision: {
@@ -124,15 +150,15 @@ const getAgent = (
 
   // RAG Retrieve Node - Performs vector similarity search
   async function ragRetrieve(state: typeof MessagesState.State) {
-    logger(debug, "\n📚 [ragRetrieve] Retrieving documents...");
-    
+    logger(debug, "\n[FluidTools: RAG Retrieve] Retrieving documents...");
+
     if (!state.ragDecision?.useRag) {
-      logger(debug, "⚠️  [ragRetrieve] RAG not requested, skipping");
+      logger(debug, "[FluidTools: RAG Retrieve] RAG not requested, skipping");
       return {};
     }
 
     if (!ragProvider) {
-      logger(debug, "⚠️  [ragRetrieve] No RAG provider available");
+      logger(debug, "[FluidTools: RAG Retrieve] No RAG provider available");
       return {
         ragDocs: [],
         ragContext: ""
@@ -141,8 +167,8 @@ const getAgent = (
 
     const query = state.ragDecision.query || getLatestUserMessage(state);
     const k = state.ragDecision.k || ragConfig?.maxDocuments || 5;
-    
-    logger(debug, `📚 [ragRetrieve] Searching for "${query}" (k=${k})`);
+
+    logger(debug, `[FluidTools: RAG Retrieve] Searching for "${query}" (k=${k})`);
 
     try {
       // Use RAG provider's searchSimilarDocuments method
@@ -150,30 +176,30 @@ const getAgent = (
         limit: k,
         threshold: ragConfig?.similarityThreshold || 0.7
       });
-      
+
       // Create context string with document labels
       let ragContext = "";
       if (docs.length > 0) {
         ragContext = docs
           .map((doc, index) => `[#${index + 1}] ${doc.content}`)
           .join("\n\n");
-        
+
         // Apply context window limit if configured
         if (ragConfig?.contextWindow && ragContext.length > ragConfig.contextWindow) {
           ragContext = ragContext.substring(0, ragConfig.contextWindow) + "...";
-          logger(debug, `📚 [ragRetrieve] Trimmed context to ${ragConfig.contextWindow} chars`);
+          logger(debug, `[FluidTools: RAG Retrieve] Trimmed context to ${ragConfig.contextWindow} chars`);
         }
       }
 
-      logger(debug, `📚 [ragRetrieve] Retrieved ${docs.length} documents`);
-      
+      logger(debug, `[FluidTools: RAG Retrieve] Retrieved ${docs.length} documents`);
+
       return {
         ragDocs: docs,
         ragContext
       };
-      
+
     } catch (error) {
-      logger(debug, "⚠️  [ragRetrieve] Error during retrieval:", error);
+      logger(debug, "[FluidTools: RAG Retrieve] Error during retrieval:", error);
       return {
         ragDocs: [],
         ragContext: ""
@@ -182,7 +208,7 @@ const getAgent = (
   }
 
   async function llmCall(state: typeof MessagesState.State, config?: RunnableConfig) {
-    logger(debug, "\n🔍 [llmCall] Current state:", {
+    logger(debug, "\n[FluidTools: LLM Call] Current state:", {
       messageCount: state.messages.length,
       maxToolCalls: state.maxToolCalls,
       hasRagContext: !!state.ragContext,
@@ -196,15 +222,15 @@ const getAgent = (
     let systemContent = getSystemInstructions();
     if (state.ragContext) {
       systemContent += `\n\nContext:\n${state.ragContext}`;
-      logger(debug, "📚 [llmCall] Added RAG context to system message");
+      logger(debug, "[FluidTools: LLM Call] Added RAG context to system message");
     }
-    
+
     const enhancedSystemMessage = new SystemMessage(systemContent);
     const messages = [enhancedSystemMessage, ...state.messages];
 
-    logger(debug, "📤 [llmCall] Sending messages to LLM:", messages.length);
+    logger(debug, "[FluidTools: LLM Call] Sending messages to LLM:", messages.length);
     const aiMessage = await modelWithTools.invoke(messages);
-    logger(debug, "📥 [llmCall] Received AI message:", {
+    logger(debug, "[FluidTools: LLM Call] Received AI message:", {
       hasToolCalls: !!aiMessage.tool_calls?.length,
       toolCallCount: aiMessage.tool_calls?.length || 0,
     });
@@ -215,10 +241,10 @@ const getAgent = (
   }
 
   async function toolNode(state: typeof MessagesState.State, config?: RunnableConfig) {
-    logger(debug, "\n🔧 [toolNode] Executing tools...");
+    logger(debug, "\n[FluidTools: Tool Node] Executing tools...");
     const lastMessage = state.messages.at(-1);
     if (lastMessage == null || !AIMessage.isInstance(lastMessage)) {
-      logger(debug, "⚠️  [toolNode] No valid AI message found");
+      logger(debug, "[FluidTools: Tool Node] No valid AI message found");
       return {
         messages: [],
         pendingConfirmations: [],
@@ -226,7 +252,7 @@ const getAgent = (
       };
     }
 
-    const result: ToolMessage[] = [];
+    const result: BaseMessage[] = [];
     const newPendingConfirmations: PendingToolCall[] = [];
     const runtimeTools = (config?.configurable?.tools as Tools | undefined) ?? toolObj;
     const toolsByName = runtimeTools.getToolByName(debug);
@@ -240,21 +266,21 @@ const getAgent = (
     );
 
     for (const toolCall of lastMessage.tool_calls ?? []) {
-      logger(debug, `🛠️  [toolNode] Checking tool: ${toolCall.name}`);
+      logger(debug, `[FluidTools: Tool Node] Checking tool: ${toolCall.name}`);
 
       const existingConfirmation = pendingByToolCallId.get(toolCall.id!);
 
       if (existingConfirmation) {
         logger(
           debug,
-          `🔄 [toolNode] Found existing confirmation for ${toolCall.name}: ${existingConfirmation.status}`
+          `[FluidTools: Tool Node] Found existing confirmation for ${toolCall.name}: ${existingConfirmation.status}`
         );
 
         if (existingConfirmation.status === "approved") {
           // Tool was approved - execute it now
           logger(
             debug,
-            `✅ [toolNode] Tool ${toolCall.name} was approved, executing...`
+            `[FluidTools: Tool Node] Tool ${toolCall.name} was approved, executing...`
           );
           const tool = toolsByName[toolCall.name];
           if (!tool) {
@@ -286,7 +312,7 @@ const getAgent = (
           // Tool was rejected - add rejection message
           logger(
             debug,
-            `❌ [toolNode] Tool ${toolCall.name} was rejected by user`
+            `[FluidTools: Tool Node] Tool ${toolCall.name} was rejected by user`
           );
           result.push(
             new ToolMessage({
@@ -295,23 +321,32 @@ const getAgent = (
               content: `Action "${toolCall.name}" was cancelled by user.`,
             })
           );
+          // Add explicit instruction for LLM to acknowledge the cancellation
+          result.push(
+            new HumanMessage(
+              `The user declined the tool call "${toolCall.name}". Please inform them you could not complete the action.`
+            )
+          );
           continue;
         }
         // If still 'pending', fall through to normal processing
       }
 
       // Check if this tool requires confirmation
-      if (requiresConfirmation.has(toolCall.name)) {
+      if (checkRequiresConfirmation(toolCall.name)) {
         logger(
           debug,
-          `⚠️  [toolNode] Tool ${toolCall.name} requires confirmation!`
+          `[FluidTools: Tool Node] Tool ${toolCall.name} requires confirmation!`
         );
 
         // Add to pending and pause for human confirmation
+        const filteredArgs = Object.fromEntries(
+          Object.entries(toolCall.args || {}).filter(([key]) => key !== key.toUpperCase())
+        );
         newPendingConfirmations.push({
           toolName: toolCall.name,
           toolCallId: toolCall.id!,
-          args: toolCall.args,
+          args: filteredArgs,
           status: "pending",
         });
         continue;
@@ -349,7 +384,7 @@ const getAgent = (
     if (newPendingConfirmations.length > 0) {
       logger(
         debug,
-        `⏸️  [toolNode] Pausing for ${newPendingConfirmations.length} confirmations`
+        `[FluidTools: Tool Node] Pausing for ${newPendingConfirmations.length} confirmations`
       );
       return {
         messages: result,
@@ -358,7 +393,7 @@ const getAgent = (
       };
     }
 
-    logger(debug, `📦 [toolNode] Returning ${result.length} tool messages`);
+    logger(debug, `[FluidTools: Tool Node] Returning ${result.length} tool messages`);
     return {
       messages: result,
       pendingConfirmations: [],
@@ -366,11 +401,11 @@ const getAgent = (
     };
   }
   async function shouldContinue(state: typeof MessagesState.State) {
-    logger(debug, "\n [shouldContinue] Deciding next step...");
+    logger(debug, "\n[FluidTools: Execution] Deciding next step...");
 
     const lastMessage = state.messages.at(-1);
     if (lastMessage == null || !AIMessage.isInstance(lastMessage)) {
-      logger(debug, " [shouldContinue] No AI message, ending");
+      logger(debug, "[FluidTools: Execution] No AI message, ending");
       return END;
     }
 
@@ -382,7 +417,7 @@ const getAgent = (
     const maxToolCalls = state.maxToolCalls || 10;
     logger(
       debug,
-      `📊 [shouldContinue] Tool calls: ${toolCallCount}/${maxToolCalls}`
+      `[FluidTools: Execution] Tool calls: ${toolCallCount}/${maxToolCalls}`
     );
 
     // Stop if we've hit the recursion limit
@@ -398,25 +433,39 @@ const getAgent = (
     if (lastMessage.tool_calls?.length) {
       logger(
         debug,
-        `➡️  [shouldContinue] Continuing to toolNode (${lastMessage.tool_calls.length} tools)`
+        `[FluidTools: Execution] Continuing to toolNode (${lastMessage.tool_calls.length} tools)`
       );
       return "toolNode";
     }
 
     // Otherwise, we stop (reply to the user)
-    logger(debug, "🏁 [shouldContinue] No more tool calls, ending");
+    logger(debug, "[FluidTools: Execution] No more tool calls, ending");
     return END;
   }
 
-  // Node that pauses for human confirmation
   async function awaitConfirmationNode(state: typeof MessagesState.State) {
     logger(
       debug,
-      "\n⏸️  [awaitConfirmation] Graph paused for human confirmation"
+      "\n[FluidTools: HITL] Graph paused for human confirmation"
     );
     logger(debug, "Pending confirmations:", state.pendingConfirmations);
 
     return {};
+  }
+
+  /** Trims messages to keep context window manageable */
+  async function trimMessagesNode(state: typeof MessagesState.State) {
+    const limit = state.maxMessages || 50;
+    if (state.messages.length <= limit) return {};
+
+    logger(debug, `[FluidTools: Trimming] Limit reached (${state.messages.length}/${limit}). Trimming history...`);
+    
+    // Always keep at least the last 'limit' messages
+    // Note: In a real scenario we might want to ensure we don't trim middle of a tool call/response pair
+    // but for simple history trimming this is standard.
+    return {
+      messages: state.messages.slice(-limit)
+    };
   }
 
   // Conditional edge function for RAG router
@@ -433,17 +482,20 @@ const getAgent = (
   // If RAG is disabled, use the original flow
   if (!ragConfig?.enabled) {
     logger(debug, "📚 RAG is disabled, using standard flow");
-    
-    if (confirmationConfig?.requireConfirmation?.length) {
+
+    if (isHitlEnabled) {
       // Graph with human-in-the-loop confirmation (no RAG)
       const agent = new StateGraph(MessagesState)
         .addNode("llmCall", llmCall)
         .addNode("toolNode", toolNode)
         .addNode("awaitConfirmation", awaitConfirmationNode)
-        .addEdge(START, "llmCall")
+        .addNode("trimMessages", trimMessagesNode)
+        .addEdge(START, "trimMessages")
+        .addEdge("trimMessages", "llmCall")
         .addConditionalEdges("llmCall", shouldContinue, [
           "toolNode",
           "awaitConfirmation",
+          "trimMessages",
           END,
         ])
         .addConditionalEdges(
@@ -452,9 +504,9 @@ const getAgent = (
             if (state.awaitingConfirmation) {
               return "awaitConfirmation";
             }
-            return "llmCall";
+            return "trimMessages";
           },
-          ["awaitConfirmation", "llmCall"]
+          ["awaitConfirmation", "trimMessages"]
         )
         .addEdge("awaitConfirmation", "toolNode")
         .compile({
@@ -468,9 +520,11 @@ const getAgent = (
       const agent = new StateGraph(MessagesState)
         .addNode("llmCall", llmCall)
         .addNode("toolNode", toolNode)
-        .addEdge(START, "llmCall")
-        .addConditionalEdges("llmCall", shouldContinue, ["toolNode", END])
-        .addEdge("toolNode", "llmCall")
+        .addNode("trimMessages", trimMessagesNode)
+        .addEdge(START, "trimMessages")
+        .addEdge("trimMessages", "llmCall")
+        .addConditionalEdges("llmCall", shouldContinue, ["toolNode", "trimMessages", END])
+        .addEdge("toolNode", "trimMessages")
         .compile({ checkpointer: memory });
 
       return agent;
@@ -480,7 +534,7 @@ const getAgent = (
   // RAG-enabled flow
   logger(debug, "📚 RAG is enabled, using RAG-enhanced flow");
 
-  if (confirmationConfig?.requireConfirmation?.length) {
+  if (isHitlEnabled) {
     // Graph with RAG and human-in-the-loop confirmation
     const agent = new StateGraph(MessagesState)
       .addNode("ragRouter", ragRouter)
@@ -488,23 +542,26 @@ const getAgent = (
       .addNode("llmCall", llmCall)
       .addNode("toolNode", toolNode)
       .addNode("awaitConfirmation", awaitConfirmationNode)
-      .addEdge(START, "ragRouter")
-      .addConditionalEdges("ragRouter", ragRouterDecision, ["ragRetrieve", "llmCall"])
-      .addEdge("ragRetrieve", "llmCall")
-      .addConditionalEdges("llmCall", shouldContinue, [
-        "toolNode",
-        "awaitConfirmation",
-        END,
-      ])
+        .addNode("trimMessages", trimMessagesNode)
+        .addEdge(START, "trimMessages")
+        .addEdge("trimMessages", "ragRouter")
+        .addConditionalEdges("ragRouter", ragRouterDecision, ["ragRetrieve", "llmCall"])
+        .addEdge("ragRetrieve", "llmCall")
+        .addConditionalEdges("llmCall", shouldContinue, [
+          "toolNode",
+          "awaitConfirmation",
+          "trimMessages",
+          END,
+        ])
       .addConditionalEdges(
         "toolNode",
         (state) => {
           if (state.awaitingConfirmation) {
             return "awaitConfirmation";
           }
-          return "llmCall";
+          return "trimMessages";
         },
-        ["awaitConfirmation", "llmCall"]
+        ["awaitConfirmation", "trimMessages"]
       )
       .addEdge("awaitConfirmation", "toolNode")
       .compile({
@@ -520,11 +577,13 @@ const getAgent = (
       .addNode("ragRetrieve", ragRetrieve)
       .addNode("llmCall", llmCall)
       .addNode("toolNode", toolNode)
-      .addEdge(START, "ragRouter")
+      .addNode("trimMessages", trimMessagesNode)
+      .addEdge(START, "trimMessages")
+      .addEdge("trimMessages", "ragRouter")
       .addConditionalEdges("ragRouter", ragRouterDecision, ["ragRetrieve", "llmCall"])
       .addEdge("ragRetrieve", "llmCall")
-      .addConditionalEdges("llmCall", shouldContinue, ["toolNode", END])
-      .addEdge("toolNode", "llmCall")
+      .addConditionalEdges("llmCall", shouldContinue, ["toolNode", "trimMessages", END])
+      .addEdge("toolNode", "trimMessages")
       .compile({ checkpointer: memory });
 
     return agent;

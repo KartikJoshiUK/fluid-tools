@@ -19,7 +19,7 @@ import type { RetryConfig } from "../converters/retry.types.js";
 import { EmbeddingClient, Tool } from '../embeddings/client.js';
 import { RAGConfig, RAGDocument, RAGProvider } from '../types/rag.types.js';
 import { QueryConfig, QueryLog, QueryMetadata, QueryProvider } from '../types/query.types.js';
-import type { BaseCheckpointSaver } from "@langchain/langgraph";
+import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { HeaderResolver } from "../types/header.types.js";
 import type { ContentFilter } from "../types/filter.types.js";
 import type { RateLimitConfig } from "../types/ratelimit.types.js";
@@ -80,6 +80,7 @@ interface BaseFluidToolsClientOptions {
   retryConfig?: RetryConfig;
   contentFilter?: ContentFilter;
   rateLimitConfig?: RateLimitConfig;
+  maxMessages?: number;
 }
 
 type PostmanSourceOptions = {
@@ -125,6 +126,7 @@ class FluidToolsClient {
   private contentFilterInput: (query: string) => string | Promise<string>;
   private contentFilterOutput: (toolName: string, response: string) => string | Promise<string>;
   private rateLimitConfig?: RateLimitConfig;
+  private maxMessages: number;
 
   constructor(
     options: FluidToolsClientOptions
@@ -156,25 +158,26 @@ class FluidToolsClient {
 
     const builtTools = options.postmanCollection
       ? postmanToTools(
-          options.postmanCollection,
-          axios,
-          resolvedToolsConfig,
-          options.retryConfig,
-          this.headerResolver,
-          options.debug ?? false
-        )
+        options.postmanCollection,
+        axios,
+        resolvedToolsConfig,
+        options.retryConfig,
+        this.headerResolver,
+        options.debug ?? false
+      )
       : openApiToTools(
-          options.openApiSpec,
-          axios,
-          resolvedToolsConfig,
-          options.retryConfig,
-          this.headerResolver,
-          options.debug ?? false
-        );
+        options.openApiSpec,
+        axios,
+        resolvedToolsConfig,
+        options.retryConfig,
+        this.headerResolver,
+        options.debug ?? false
+      );
     this.tools = new Tools(builtTools, resolvedToolsConfig);
     this.config = options.config;
     this.systemInstructions = options.systemInstructions ?? "";
     this.maxToolCalls = options.maxToolCalls ?? 10;
+    this.maxMessages = options.maxMessages ?? 50;
     this.debug = options.debug ?? false;
     this.confirmationConfig = options.confirmationConfig;
 
@@ -208,16 +211,16 @@ class FluidToolsClient {
           maxCacheEntries: options.embeddingConfig.maxCacheEntries,
         }
       );
-      logger(this.debug, "🔧 [FluidToolsClient] Embeddings enabled");
+      logger(this.debug, "[FluidToolsClient] Embeddings enabled");
     } else {
-      logger(this.debug, "ℹ️ [FluidToolsClient] Embeddings disabled");
+      logger(this.debug, "[FluidToolsClient] Embeddings disabled");
     }
 
     // Log query tracking status
     if (this.queryProvider && this.queryConfig?.enabled) {
-      logger(this.debug, "🔧 [FluidToolsClient] Query tracking enabled");
+      logger(this.debug, "[FluidToolsClient] Query tracking enabled");
     } else {
-      logger(this.debug, "ℹ️ [FluidToolsClient] Query tracking disabled");
+      logger(this.debug, "[FluidToolsClient] Query tracking disabled");
     }
 
     this.sessionMap = new FluidSession(
@@ -236,6 +239,7 @@ class FluidToolsClient {
       ragProvider: this.ragProvider,
       contentFilterOutput: this.contentFilterOutput,
       checkpointer: options.checkpointer,
+      maxMessages: this.maxMessages,
     });
   }
 
@@ -279,22 +283,22 @@ class FluidToolsClient {
    */
   public async indexToolsForSession(sessionId: string, tools: Tool[]): Promise<void> {
     if (!this.embeddingClient) {
-      logger(this.debug, "ℹ️ [FluidToolsClient] Embedding client not initialized, skipping indexing");
+      logger(this.debug, "[FluidToolsClient] Embedding client not initialized, skipping indexing");
       return;
     }
 
     try {
-      logger(this.debug, `📊 [FluidToolsClient] Indexing ${tools.length} tools for session ${sessionId}`);
+      logger(this.debug, `[FluidToolsClient] Indexing ${tools.length} tools for session ${sessionId}`);
       await this.embeddingClient.indexTools(sessionId, tools);
-      logger(this.debug, `✅ [FluidToolsClient] Successfully indexed tools for session ${sessionId}`);
+      logger(this.debug, `[FluidToolsClient] Successfully indexed tools for session ${sessionId}`);
     } catch (error) {
-      logger(true, `❌ [FluidToolsClient] Failed to index tools for session ${sessionId}:`, error);
-      logger(true, "⚠️ [FluidToolsClient] Continuing without embeddings - will use all tools as fallback");
+      logger(true, `[FluidToolsClient] Failed to index tools for session ${sessionId}:`, error);
+      logger(true, "[FluidToolsClient] Continuing without embeddings - will use all tools as fallback");
     }
   }
 
-  private getSessionDetails(accessToken?: string){
-    return this.sessionMap.getSession(accessToken, (threadId: string)=>{
+  private getSessionDetails(accessToken?: string) {
+    return this.sessionMap.getSession(accessToken, (threadId: string) => {
       this.fluidTool.clearThreadMemory(threadId);
       this.fluidTool.clearThreadTools(threadId);
     })
@@ -346,7 +350,7 @@ class FluidToolsClient {
     let acquiredConcurrencySlot = false;
     try {
       const filteredQuery = await this.contentFilterInput(query);
-      logger(this.debug, "\n🎯 [FluidToolsClient] Query received:", filteredQuery);
+      logger(this.debug, "\n[FluidToolsClient] Query received:", filteredQuery);
 
       const threadId = this.getSessionDetails(accessToken).threadId;
       const concurrencyResult = this.sessionMap.acquireConcurrencySlot(
@@ -392,15 +396,15 @@ class FluidToolsClient {
           };
 
           await this.queryProvider.logQuery(queryLog);
-          logger(this.debug, `✅ [FluidToolsClient] Query logged for client: ${metadata.clientId}`);
+          logger(this.debug, `[FluidToolsClient] Query logged for client: ${metadata.clientId}`);
         } catch (loggingError) {
           // Log the error but don't disrupt query processing
-          logger(true, `⚠️ [FluidToolsClient] Failed to log query:`, loggingError);
+          logger(true, `[FluidToolsClient] Failed to log query:`, loggingError);
         }
       } else if (metadata?.clientId && !this.queryProvider) {
-        logger(this.debug, "ℹ️ [FluidToolsClient] Skipping query logging - query provider not configured");
+        logger(this.debug, "[FluidToolsClient] Skipping query logging - query provider not configured");
       } else if (!metadata?.clientId) {
-        logger(this.debug, "ℹ️ [FluidToolsClient] Skipping query logging - clientId not provided");
+        logger(this.debug, "[FluidToolsClient] Skipping query logging - clientId not provided");
       }
 
       const scopedTools = await this.getScopedTools(filteredQuery, threadId);
@@ -410,7 +414,7 @@ class FluidToolsClient {
         scopedTools,
         accessToken
       );
-      const pendingConfirmations = await this.fluidTool.getPendingConfirmations(threadId);
+      const pendingConfirmations = (response.pendingConfirmations ?? []).filter((p) => p.status === "pending");
       if (pendingConfirmations.length > 0) {
         return { status: "awaiting_confirmation", pendingConfirmations };
       }
@@ -440,19 +444,19 @@ class FluidToolsClient {
         const selectedToolNames = await this.embeddingClient.selectTools(lookupId, query, this.embeddingTopK);
 
         if (selectedToolNames.length > 0) {
-          logger(this.debug, `✅ [FluidToolsClient] Selected ${selectedToolNames.length} tools`);
+          logger(this.debug, `[FluidToolsClient] Selected ${selectedToolNames.length} tools`);
           return this.tools.withFilter(selectedToolNames);
         }
 
-        logger(this.debug, `⚠️ [FluidToolsClient] No tools selected, using all tools`);
+        logger(this.debug, `[FluidToolsClient] No tools selected, using all tools`);
         return this.tools;
       } catch (error) {
-        logger(true, `❌ [FluidToolsClient] Tool selection failed, falling back to all tools:`, error);
+        logger(true, `[FluidToolsClient] Tool selection failed, falling back to all tools:`, error);
         return this.tools;
       }
     }
 
-    logger(this.debug, "ℹ️ [FluidToolsClient] Embeddings disabled, using all tools");
+    logger(this.debug, "[FluidToolsClient] Embeddings disabled, using all tools");
     return this.tools;
   }
 
@@ -502,15 +506,15 @@ class FluidToolsClient {
         };
 
         await this.queryProvider.logQuery(queryLog);
-        logger(this.debug, `✅ [FluidToolsClient] Query logged for client: ${metadata.clientId}`);
+        logger(this.debug, `[FluidToolsClient] Query logged for client: ${metadata.clientId}`);
       } catch (loggingError) {
         // Log the error but don't disrupt query processing
-        logger(true, `⚠️ [FluidToolsClient] Failed to log query:`, loggingError);
+        logger(true, `[FluidToolsClient] Failed to log query:`, loggingError);
       }
     } else if (metadata?.clientId && !this.queryProvider) {
-      logger(this.debug, "ℹ️ [FluidToolsClient] Skipping query logging - query provider not configured");
+      logger(this.debug, "[FluidToolsClient] Skipping query logging - query provider not configured");
     } else if (!metadata?.clientId) {
-      logger(this.debug, "ℹ️ [FluidToolsClient] Skipping query logging - clientId not provided");
+      logger(this.debug, "[FluidToolsClient] Skipping query logging - clientId not provided");
     }
 
     const scopedTools = await this.getScopedTools(filteredQuery, threadId);
@@ -681,14 +685,22 @@ class FluidToolsClient {
   }
 
   /**
+   * Get names of all registered tools
+   */
+  public getRegisteredTools(): string[] {
+    return Object.keys(this.tools.getToolByName());
+  }
+
+  /**
    * Approve a pending tool call and continue execution
    * @param toolCallId The ID of the tool call to approve
+   * @throws {Error} if toolCallId is not found or already resolved
    */
   public async approveToolCall(toolCallId: string, accessToken?: string): Promise<FluidQueryResult> {
     try {
       const threadId = this.getSessionDetails(accessToken).threadId;
       const result = await this.fluidTool.approveToolCall(toolCallId, threadId, accessToken);
-      const pendingConfirmations = await this.fluidTool.getPendingConfirmations(threadId);
+      const pendingConfirmations = (result.pendingConfirmations ?? []).filter((p) => p.status === "pending");
       if (pendingConfirmations.length > 0) {
         return { status: "awaiting_confirmation", pendingConfirmations };
       }
@@ -709,12 +721,13 @@ class FluidToolsClient {
   /**
    * Reject a pending tool call and continue execution
    * @param toolCallId The ID of the tool call to reject
+   * @throws {Error} if toolCallId is not found or already resolved
    */
   public async rejectToolCall(toolCallId: string, accessToken?: string): Promise<FluidQueryResult> {
     try {
       const threadId = this.getSessionDetails(accessToken).threadId;
       const result = await this.fluidTool.rejectToolCall(toolCallId, threadId, accessToken);
-      const pendingConfirmations = await this.fluidTool.getPendingConfirmations(threadId);
+      const pendingConfirmations = (result.pendingConfirmations ?? []).filter((p) => p.status === "pending");
       if (pendingConfirmations.length > 0) {
         return { status: "awaiting_confirmation", pendingConfirmations };
       }
@@ -740,7 +753,7 @@ class FluidToolsClient {
     documents: Array<{ id: string; content: string; metadata?: Record<string, unknown> }>
   ) {
     if (!this.ragProvider) {
-      logger(this.debug, "⚠️ [FluidToolsClient] No RAG provider available for indexing");
+      logger(this.debug, "[FluidToolsClient] No RAG provider available for indexing");
       return;
     }
 
@@ -749,9 +762,9 @@ class FluidToolsClient {
       content: doc.content,
       metadata: doc.metadata || {}
     }));
-    
+
     await this.ragProvider.indexDocuments(ragDocuments);
-    logger(this.debug, `✅ [FluidToolsClient] Indexed ${ragDocuments.length} documents`);
+    logger(this.debug, `[FluidToolsClient] Indexed ${ragDocuments.length} documents`);
   }
 
   /**
@@ -761,11 +774,11 @@ class FluidToolsClient {
     if (!this.ragConfig?.enabled || !this.ragProvider) {
       return false;
     }
-    
+
     try {
       return await this.ragProvider.isAvailable();
     } catch (error) {
-      logger(this.debug, "❌ [FluidToolsClient] RAG provider availability check failed:", error);
+      logger(this.debug, "[FluidToolsClient] RAG provider availability check failed:", error);
       return false;
     }
   }

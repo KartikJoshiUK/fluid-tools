@@ -57,4 +57,5 @@ export interface PostmanCollection {
 export interface PostmanRequest {
   name: string;
   request: PostmanRequestDetail;
+  folderNames?: string[];
 }

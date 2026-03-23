@@ -3,7 +3,7 @@ import { Tools } from './langgraph/tool.js';
 import type { ToolDictionary, ToolFactory } from './langgraph/tool.js';
 import { ProviderConfigError } from './langgraph/config.js';
 import { ensureProviderInstalled } from './langgraph/factory.js';
-import type { BaseCheckpointSaver } from '@langchain/langgraph';
+import type { BaseCheckpointSaver } from '@langchain/langgraph-checkpoint';
 
 // LangGraph types
 import type {
@@ -14,11 +14,11 @@ import type {
   OllamaConfig,
   OpenAIConfig,
   ProviderConfig,
-  ProviderType,           
-  BaseProviderConfig,     
-  Model,                  
-  ToolConfirmationConfig, 
-  PendingToolCall,        
+  ProviderType,
+  BaseProviderConfig,
+  Model,
+  ToolConfirmationConfig,
+  PendingToolCall,
   FluidStreamEvent,
   StreamEventType,
   FluidQueryResult,
@@ -39,17 +39,17 @@ import type { RateLimitConfig } from './types/ratelimit.types.js';
 // Converter types
 import type {
   PostmanCollection,
-  PostmanDescriptionObject, 
-  PostmanDescription,       
-  PostmanQueryParam,        
-  PostmanUrlObject,         
-  PostmanUrl,              
-  PostmanBodyField,        
-  PostmanBody,             
-  PostmanRequestDetail,    
-  PostmanItem,             
-  PostmanCollectionInfo,   
-  PostmanRequest,          
+  PostmanDescriptionObject,
+  PostmanDescription,
+  PostmanQueryParam,
+  PostmanUrlObject,
+  PostmanUrl,
+  PostmanBodyField,
+  PostmanBody,
+  PostmanRequestDetail,
+  PostmanItem,
+  PostmanCollectionInfo,
+  PostmanRequest,
 } from './converters/types.js';
 import { openApiToTools } from './converters/openapi-to-tools.js';
 import {
@@ -73,9 +73,9 @@ import type {
   RAGConfig,
   RAGDocument,
   RAGProvider,
-  RAGSearchOptions,        
-  RAGDecision,            
-  RAGEnhancementResult,   
+  RAGSearchOptions,
+  RAGDecision,
+  RAGEnhancementResult,
 } from './types/rag.types.js';
 
 // Query types (ALL NEW)

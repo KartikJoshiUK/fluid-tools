@@ -1,3 +1,4 @@
+import { BaseMessage } from "@langchain/core/messages";
 import { MessagesAnnotation } from "@langchain/langgraph";
 import { Annotation } from "@langchain/langgraph";
 import { PendingToolCall } from './types';
@@ -18,8 +19,20 @@ import { RAGDecision, RAGDocument } from '../types/rag.types';
  * pendingConfirmations for human-in-the-loop support.
  */
 const MessagesState = Annotation.Root({
-  ...MessagesAnnotation.spec,
-  // authToken: Annotation<string | undefined>(),
+  // Override messages with a trimming reducer
+  messages: Annotation<BaseMessage[]>({
+    reducer: (x, y) => {
+      // LangGraph v1.0 reducers are (previous, next)
+      // Standard messages reducer just appends.
+      // Trimming is now handled by the trimMessagesNode for dynamic configuration.
+      return [...x, ...y];
+    },
+    default: () => [],
+  }),
+  maxMessages: Annotation<number>({
+    reducer: (x, y) => y ?? x,
+    default: () => 50,
+  }),
   maxToolCalls: Annotation<number>({
     reducer: (x, y) => y ?? x,
     default: () => 10,

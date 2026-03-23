@@ -12,7 +12,11 @@ import {
 import { RAGConfig, RAGProvider } from '../types/rag.types';
 import { DEFAULT_SYSTEM_INSTRUCTIONS } from './constants';
 import { Tools } from './tool';
-import { BaseCheckpointSaver, MemorySaver } from "@langchain/langgraph";
+import { MemorySaver, StateSnapshot, Command } from "@langchain/langgraph";
+import { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
+import MessagesState from "./state";
+
+type FluidState = typeof MessagesState.State;
 
 type ContentFilterOutput = (toolName: string, response: string) => string | Promise<string>;
 
@@ -24,6 +28,7 @@ class FluidTools {
   private tools: Tools;
   private threadTools: Map<string, Tools>;
   private threadAuthTokens: Map<string, string>;
+  private maxMessages: number;
 
   constructor(
     {
@@ -37,17 +42,19 @@ class FluidTools {
       ragProvider,
       contentFilterOutput,
       checkpointer,
+      maxMessages = 50,
     }: {
       config: ProviderConfig,
       tools: Tools,
       getSystemInstructions: () => string,
-      maxToolCalls: number ,
+      maxToolCalls: number,
       debug: boolean,
       contentFilterOutput?: ContentFilterOutput,
       confirmationConfig?: ToolConfirmationConfig,
       ragConfig?: RAGConfig,
       ragProvider?: RAGProvider,
       checkpointer?: BaseCheckpointSaver,
+      maxMessages?: number,
     }
   ) {
     this.model = createProvider(config);
@@ -68,6 +75,7 @@ class FluidTools {
       ragProvider
     );
     this.maxToolCalls = maxToolCalls;
+    this.maxMessages = maxMessages;
   }
 
   public async query(
@@ -75,7 +83,7 @@ class FluidTools {
     threadId: string = "1",
     tools?: Tools,
     accessToken?: string
-  ) {
+  ): Promise<FluidState> {
     this.setThreadAuthToken(threadId, accessToken);
     const config = {
       configurable: {
@@ -89,6 +97,7 @@ class FluidTools {
       {
         messages: [new HumanMessage(query)],
         maxToolCalls: this.maxToolCalls,
+        maxMessages: this.maxMessages,
       },
       config
     );
@@ -109,7 +118,11 @@ class FluidTools {
       },
     };
     const stream = await this.agent.streamEvents(
-      { messages: [new HumanMessage(query)], maxToolCalls: this.maxToolCalls },
+      { 
+        messages: [new HumanMessage(query)], 
+        maxToolCalls: this.maxToolCalls,
+        maxMessages: this.maxMessages,
+      },
       { ...config, version: "v2" }
     );
 
@@ -122,7 +135,7 @@ class FluidTools {
    * Get the current conversation state from the checkpointer
    * @returns The current state including all messages
    */
-  public async getConversationState(threadId: string = "1") {
+  public async getConversationState(threadId: string = "1"): Promise<StateSnapshot> {
     const config = { configurable: { thread_id: threadId } };
     const state = await this.agent.getState(config);
     return state;
@@ -136,7 +149,8 @@ class FluidTools {
     threadId: string = "1"
   ): Promise<PendingToolCall[]> {
     const state = await this.getConversationState(threadId);
-    const allPending = state.values.pendingConfirmations || [];
+    const values = state.values as FluidState;
+    const allPending = values.pendingConfirmations || [];
     // Only return those that are still pending (not approved/rejected)
     return allPending.filter((p: PendingToolCall) => p.status === "pending");
   }
@@ -146,7 +160,11 @@ class FluidTools {
    * @param toolCallId The ID of the tool call to approve
    * @param threadId The thread ID (default: "1")
    */
-  public async approveToolCall(toolCallId: string, threadId: string = "1", accessToken?: string) {
+  public async approveToolCall(
+    toolCallId: string,
+    threadId: string = "1",
+    accessToken?: string
+  ): Promise<FluidState> {
     const updated = await this.updateConfirmationStatus(toolCallId, threadId, "approved");
     this.setThreadAuthToken(threadId, accessToken);
     const config = {
@@ -156,10 +174,12 @@ class FluidTools {
       },
     };
     const result = await this.agent.invoke(
-      {
-        pendingConfirmations: updated,
-        awaitingConfirmation: updated.some((p) => p.status === "pending"),
-      },
+      new Command({
+        update: {
+          pendingConfirmations: updated,
+          awaitingConfirmation: updated.some((p) => p.status === "pending"),
+        }
+      }),
       config
     );
 
@@ -171,7 +191,11 @@ class FluidTools {
    * @param toolCallId The ID of the tool call to reject
    * @param threadId The thread ID (default: "1")
    */
-  public async rejectToolCall(toolCallId: string, threadId: string = "1", accessToken?: string) {
+  public async rejectToolCall(
+    toolCallId: string,
+    threadId: string = "1",
+    accessToken?: string
+  ): Promise<FluidState> {
     const updated = await this.updateConfirmationStatus(toolCallId, threadId, "rejected");
     this.setThreadAuthToken(threadId, accessToken);
     const config = {
@@ -181,10 +205,12 @@ class FluidTools {
       },
     };
     const result = await this.agent.invoke(
-      {
-        pendingConfirmations: updated,
-        awaitingConfirmation: updated.some((p) => p.status === "pending"),
-      },
+      new Command({
+        update: {
+          pendingConfirmations: updated,
+          awaitingConfirmation: updated.some((p) => p.status === "pending"),
+        }
+      }),
       config
     );
 
@@ -220,10 +246,12 @@ class FluidTools {
       },
     };
     const stream = await this.agent.streamEvents(
-      {
-        pendingConfirmations: updated,
-        awaitingConfirmation: updated.some((p) => p.status === "pending"),
-      },
+      new Command({
+        update: {
+          pendingConfirmations: updated,
+          awaitingConfirmation: updated.some((p) => p.status === "pending"),
+        }
+      }),
       { ...config, version: "v2" }
     );
     for await (const event of stream) {
@@ -245,10 +273,12 @@ class FluidTools {
       },
     };
     const stream = await this.agent.streamEvents(
-      {
-        pendingConfirmations: updated,
-        awaitingConfirmation: updated.some((p) => p.status === "pending"),
-      },
+      new Command({
+        update: {
+          pendingConfirmations: updated,
+          awaitingConfirmation: updated.some((p) => p.status === "pending"),
+        }
+      }),
       { ...config, version: "v2" }
     );
     for await (const event of stream) {
@@ -262,7 +292,8 @@ class FluidTools {
     status: "approved" | "rejected"
   ): Promise<PendingToolCall[]> {
     const state = await this.getConversationState(threadId);
-    const pendingConfirmations: PendingToolCall[] = state.values.pendingConfirmations || [];
+    const values = state.values as FluidState;
+    const pendingConfirmations: PendingToolCall[] = values.pendingConfirmations || [];
     const targetIndex = pendingConfirmations.findIndex((p) => p.toolCallId === toolCallId);
     if (targetIndex === -1) {
       throw new Error(`No pending confirmation found for tool call ID: ${toolCallId}`);

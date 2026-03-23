@@ -26,8 +26,31 @@ describe("postmanToTools", () => {
     };
 
     const tools = postmanToTools(collection, axiosMock);
-    expect(Object.keys(tools)).toEqual(["get_users"]);
-    expect(tools.get_users.description).toContain("Fetch users from API");
+    expect(Object.keys(tools)).toEqual(["get_get_users"]);
+    expect(tools.get_get_users.description).toContain("Fetch users from API");
+    expect(tools.get_get_users.metadata?.method).toBe("GET");
+  });
+
+  it("Folder names are prepended to tool names for uniqueness", () => {
+    const collection: PostmanCollection = {
+      item: [
+        {
+          name: "Users",
+          item: [
+            {
+              name: "List",
+              request: {
+                method: "GET",
+                url: "https://api.example.com/users",
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    const tools = postmanToTools(collection, axiosMock);
+    expect(Object.keys(tools)).toEqual(["get_users_list"]);
   });
 
   it("Path params (:id, {{id}}, {id}) all extracted correctly", () => {
@@ -39,10 +62,10 @@ describe("postmanToTools", () => {
       ],
     };
 
-    const tools = postmanToTools(collection, axiosMock);
-    expect(tools.colon.schema.safeParse({ id: 123 }).success).toBe(false);
-    expect(tools.braces.schema.safeParse({ id: 123 }).success).toBe(false);
-    expect(tools.openapi.schema.safeParse({ id: 123 }).success).toBe(false);
+    const tools: any = postmanToTools(collection, axiosMock);
+    expect(tools.get_colon.schema.safeParse({ id: 123 }).success).toBe(false);
+    expect(tools.get_braces.schema.safeParse({ id: 123 }).success).toBe(false);
+    expect(tools.get_openapi.schema.safeParse({ id: 123 }).success).toBe(false);
   });
 
   it("Query params extracted correctly", () => {
@@ -58,9 +81,9 @@ describe("postmanToTools", () => {
       ],
     };
 
-    const tools = postmanToTools(collection, axiosMock);
-    expect(tools.search_users.schema.safeParse({ limit: 10 }).success).toBe(false);
-    expect(tools.search_users.schema.safeParse({ offset: 10 }).success).toBe(false);
+    const tools: any = postmanToTools(collection, axiosMock);
+    expect(tools.get_search_users.schema.safeParse({ limit: 10 }).success).toBe(false);
+    expect(tools.get_search_users.schema.safeParse({ offset: 10 }).success).toBe(false);
   });
 
   it("Body fields inferred from raw JSON sample", () => {
@@ -80,11 +103,11 @@ describe("postmanToTools", () => {
       ],
     };
 
-    const tools = postmanToTools(collection, axiosMock);
-    const ok = tools.create_user.schema.safeParse({
+    const tools: any = postmanToTools(collection, axiosMock);
+    const ok = tools.post_create_user.schema.safeParse({
       body: { name: "Bob", age: 21, active: false },
     });
-    const bad = tools.create_user.schema.safeParse({
+    const bad = tools.post_create_user.schema.safeParse({
       body: { name: 123, age: "21", active: "false" },
     });
 
@@ -102,7 +125,7 @@ describe("postmanToTools", () => {
     };
 
     const tools = postmanToTools(collection, axiosMock);
-    expect(Object.keys(tools)).toEqual(["users", "users_1"]);
+    expect(Object.keys(tools)).toEqual(["get_users", "get_users_1"]);
     expect(warnSpy).toHaveBeenCalledOnce();
     warnSpy.mockRestore();
   });
@@ -139,13 +162,13 @@ describe("postmanToTools", () => {
       })
       .mockResolvedValueOnce({ data: { ok: true } });
 
-    const tools = postmanToTools(
+    const tools: any = postmanToTools(
       collection,
       axiosMock,
       {},
       { maxRetries: 2, retryDelayMs: 1 }
     );
-    const result = await tools.get_users.invoke({});
+    const result = await tools.get_get_users.invoke({});
 
     expect(axiosMock.request).toHaveBeenCalledTimes(3);
     expect(result).toContain('"ok": true');
@@ -164,7 +187,7 @@ describe("postmanToTools", () => {
       ],
     };
     const tools = postmanToTools(collection, axiosMock);
-    const schemaKeys = Object.keys((tools.get_users.schema as any).shape);
+    const schemaKeys = Object.keys((tools.get_get_users.schema as any).shape);
     expect(schemaKeys).not.toContain("authToken");
   });
 });
